@@ -1,0 +1,154 @@
+---
+title: "Data Analysis Final"
+author: "Kai Hendershot"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+TaxiData <- read.table("C:/Users/kaise/Downloads/chicago_taxi.txt",header = TRUE)
+library(psych)
+library(magrittr)
+library(car)
+library(ggformula)
+library(gmodels)
+library(class)
+library(caret)
+```
+# View the data
+
+First I wanted to see the data to look at what type of variables I'm going to be
+working with.
+```{r}
+View(TaxiData)
+```
+
+Next I explored and looked at the data to understand what I'll be working with and 
+the association between variables as well as see if there was any type of pattern 
+that stood out between the daytype, total, and payment type.
+```{r}
+pairs.panels(TaxiData[c("daytype", "seconds", "miles", "tips", "total")])
+
+gf_point(daytype~total, data = TaxiData, shape = ~payment_type,
+         size = 4, color = ~daytype, alpha = .5,
+         position = position_dodge2(width = 0.5))%>%
+  gf_refine(scale_color_brewer(palette = 'Set1'))
+```
+# Normalize the data
+
+Then I wrote a function to normalize the data set. I had to save the columns I 
+wanted to normalize into a variable because I kept getting an error when I tried
+to list them all out and this was the solution. I then normalized the variables 
+I needed and saved them into a data frame called norm_Taxi. I then viewed the data to 
+make sure it all worked out.
+```{r}
+normie <- function(x){
+  return((x-min(x))/(max(x)-min(x)))
+}
+
+make_these_norm <- c("seconds", "miles", "tips", "total", "speed")
+TaxiData$daytype <- as.factor(TaxiData$daytype)
+
+norm_taxi <- as.data.frame(lapply(TaxiData[,make_these_norm], normie))
+View(norm_taxi)
+```
+# Split the data
+
+I next split into training and test set
+```{r}
+taxi.train.ind <- sample(1:nrow(TaxiData), nrow(TaxiData)*.6)
+taxi.training.set <- norm_taxi[taxi.train.ind,]
+taxi.test.set <- norm_taxi[-taxi.train.ind,]
+taxi.training.labels <- TaxiData[taxi.train.ind, "daytype"]
+taxi.test.labels <- TaxiData[-taxi.train.ind, "daytype"]
+```
+# Run test and interpret
+
+I used the k nearest neighbors function for my prediction where it got the 30
+nearest neighbors and I ran this on my training and test set of data
+```{r}
+td_pred <- knn(train = taxi.training.set, test = taxi.test.set,
+               cl = taxi.training.labels, k = 30)
+```
+
+I created a crosstable so I can evaluate the performance of my prediction
+```{r}
+CrossTable(x = taxi.test.labels, y = td_pred, prop.chisq = FALSE)
+```
+The model correctly predicted 'weekday' in approximately 99.2% of cases where the
+actual label was 'weekday'. The model correctly p redicted 'weekend' in about 98.5%
+of cases where the actual label was 'weekend'.The table shows the performance of
+a classification model in predicting 'weekday' and 'weekend' categories.Higher 
+percentages in the diagonal cells indicate accurate predictions by the model for
+the respective categories.Lower percentages outside the diagonal cells suggest
+misclassifications or incorrect predictions.
+
+
+# Part 2
+
+I first needed to make the daytype a factor so I could run the model I created
+becasue with it being a text variable it wouldn't run
+```{r}
+TaxiData$daytype <- as.factor(TaxiData$daytype)
+```
+
+I split the data into 70/30 with a seed for reproducibility 
+```{r}
+set.seed(123)
+train_indices <- createDataPartition(TaxiData$daytype, p = 0.7, list = FALSE)
+taxi_training <- TaxiData[train_indices, ]
+taxi_testing <- TaxiData[-train_indices, ]
+```
+
+
+I used the glm function with family = biinomial for logit regression. After that
+I looked at the model to see what it came up with and the first few values of 
+the fitted values.
+```{r}
+final.model <- glm(daytype~seconds+miles+tips+total+speed, data = taxi_training,
+                 family = "binomial")
+
+final.model
+summary(final.model)
+head(final.model$fitted.values)
+```
+
+There was some significance in speed, there was pretty high significance in tips,
+and the intercept itself was seen as pretty significant as well.
+
+I created a function for changing odds into probabilities because probabilities
+are more useful than log odds then I applied it to the linear predictors 
+```{r}
+gen.prob.function <- function(x){
+  A <- exp(x)
+  prob <- A/(1+A)
+  return(prob)
+}
+gen.prob <- sapply(final.model$linear.predictors, gen.prob.function)
+```
+
+
+Make linear predictors to log odds,and fitted values to probabilities
+```{r}
+head(final.model$fitted.values)
+sum(abs(gen.prob - final.model$fitted.values) < .0000002)
+gen.predict <- ifelse(gen.prob > .25, "weekend", "weekday")
+```
+
+Make a cross table to analyze results 
+```{r}
+CrossTable(x=gen.predict, y=taxi_training$daytype, prop.chisq = FALSE)
+```
+The model predicted 'weekday' in approximately 77.6% of cases among observations
+where the actual label was 'weekday'. The model predicted 'weekend' in 
+approximately 89.8% of cases among observations where the actual label was
+'weekend'. Overall the model was pretty good at predicting. 
+
+
+
+
